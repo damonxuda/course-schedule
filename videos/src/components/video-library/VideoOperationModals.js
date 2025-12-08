@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Upload, FolderOpen, Settings, ArrowRight, Copy, Trash2, Languages } from 'lucide-react';
+import { X, Upload, FolderOpen, ArrowRight, Copy, Trash2, Languages, Edit3 } from 'lucide-react';
 
 const VideoOperationModals = ({
   show,
@@ -138,6 +138,48 @@ const VideoOperationModals = ({
     }
   };
 
+  const handleRenameItem = async (item, newName) => {
+    setIsProcessingOperation(true);
+    try {
+      const token = await getToken();
+      const itemKey = item.key || item.Key;
+      const pathParts = itemKey.split('/');
+
+      // 构建新路径（保持相同的目录，只改变文件名）
+      pathParts[pathParts.length - 1] = newName;
+      const newPath = pathParts.join('/');
+
+      console.log(`🔄 重命名操作: ${itemKey} -> ${newPath}`);
+
+      const response = await fetch(`${apiUrl}/files/rename`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          oldPath: itemKey,
+          newPath: newPath
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`重命名文件 ${item.name} 失败: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ 重命名成功:', result);
+
+      onOperationComplete();
+      resetOperationState();
+    } catch (error) {
+      console.error('重命名失败:', error);
+      window.alert(`重命名失败: ${error.message}`);
+    } finally {
+      setIsProcessingOperation(false);
+    }
+  };
+
   const handleBatchDeleteItems = async (items) => {
     console.log('🔧 API修复版本 2024-09-27: 使用个体/files/delete调用，不使用batch-delete端点');
     setIsProcessingOperation(true);
@@ -212,6 +254,9 @@ const VideoOperationModals = ({
     if (fileOperation === 'upload') {
       return operationData.uploadFiles?.length > 0;
     }
+    if (fileOperation === 'rename') {
+      return selectedItems.length === 1 && operationData.newName?.trim();
+    }
     return false;
   };
 
@@ -279,6 +324,17 @@ const VideoOperationModals = ({
                 <div>
                   <div className="font-medium text-gray-800">复制文件/文件夹</div>
                   <div className="text-sm text-gray-500">选择一个或多个文件/文件夹进行复制</div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setFileOperation('rename')}
+                className="w-full flex items-center gap-3 p-3 text-left border rounded-lg hover:bg-yellow-50 hover:border-yellow-300 transition-colors"
+              >
+                <Edit3 className="text-yellow-600" size={20} />
+                <div>
+                  <div className="font-medium text-gray-800">重命名文件/文件夹</div>
+                  <div className="text-sm text-gray-500">为文件或文件夹重新命名</div>
                 </div>
               </button>
 
@@ -480,6 +536,63 @@ const VideoOperationModals = ({
                 </div>
               )}
 
+              {fileOperation === 'rename' && (
+                <div>
+                  <div className="mb-3">
+                    <p className="text-sm text-gray-600 mb-3">选择要重命名的文件或文件夹：</p>
+                    <div className="max-h-60 overflow-y-auto space-y-2 border rounded-lg p-2">
+                      {getVideoOnlyItems(items).map((item, index) => (
+                        <label key={index} className="flex items-center gap-3 p-2 border rounded hover:bg-gray-50 transition-colors cursor-pointer">
+                          <input
+                            type="radio"
+                            name="renameItem"
+                            checked={selectedItems.length === 1 && (selectedItems[0].key || selectedItems[0].Key) === (item.key || item.Key)}
+                            onChange={() => {
+                              setSelectedItems([item]);
+                              // 自动填充当前文件名到输入框
+                              setOperationData({...operationData, newName: item.name});
+                            }}
+                            className="text-yellow-600"
+                          />
+                          <div className="flex-1">
+                            <div className="font-medium">{item.name}</div>
+                            <div className="text-xs text-gray-500">
+                              {item.type === 'folder' ? '文件夹' : '文件'}
+                            </div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+
+                    {selectedItems.length === 1 && (
+                      <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                        <p className="text-sm text-yellow-800 mb-2">
+                          已选择: {selectedItems[0].name}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedItems.length === 1 && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        新名称
+                      </label>
+                      <input
+                        type="text"
+                        value={operationData.newName || ''}
+                        onChange={(e) => setOperationData({...operationData, newName: e.target.value})}
+                        placeholder="输入新的文件/文件夹名称"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500"
+                      />
+                      <div className="mt-2 text-xs text-gray-500">
+                        将重命名为: {operationData.newName || '(请输入新名称)'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {fileOperation === 'delete' && (
                 <div>
                   <div className="mb-3">
@@ -543,6 +656,8 @@ const VideoOperationModals = ({
                       await handleBatchMoveItems(selectedItems, operationData.targetFolder || '');
                     } else if (fileOperation === 'copy' && selectedItems.length > 0) {
                       await handleBatchCopyItems(selectedItems, operationData.targetFolder || '');
+                    } else if (fileOperation === 'rename' && selectedItems.length === 1 && operationData.newName) {
+                      await handleRenameItem(selectedItems[0], operationData.newName);
                     } else if (fileOperation === 'delete' && selectedItems.length > 0) {
                       if (window.confirm(`确定要删除选中的 ${selectedItems.length} 个项目吗？此操作不可恢复。`)) {
                         await handleBatchDeleteItems(selectedItems);
